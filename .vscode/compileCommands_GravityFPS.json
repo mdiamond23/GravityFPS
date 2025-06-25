@@ -1,0 +1,26 @@
+[
+	{
+		"file": "C:\\Users\\Matt\\Documents\\Unreal Projects\\GravityFPS\\Source\\GravityFPS\\GravityFPS.Build.cs",
+		"arguments": [
+			"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64\\cl.exe",
+			"@C:\\Users\\Matt\\Documents\\Unreal Projects\\GravityFPS\\.vscode\\compileCommands_GravityFPS\\GravityFPS.1.rsp"
+		],
+		"directory": "F:\\Unreal\\UE_5.4\\Engine\\Source"
+	},
+	{
+		"file": "C:\\Users\\Matt\\Documents\\Unreal Projects\\GravityFPS\\Source\\GravityFPS\\GravityFPS.cpp",
+		"arguments": [
+			"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64\\cl.exe",
+			"@C:\\Users\\Matt\\Documents\\Unreal Projects\\GravityFPS\\.vscode\\compileCommands_GravityFPS\\GravityFPS.1.rsp"
+		],
+		"directory": "F:\\Unreal\\UE_5.4\\Engine\\Source"
+	},
+	{
+		"file": "C:\\Users\\Matt\\Documents\\Unreal Projects\\GravityFPS\\Source\\GravityFPS\\GravityFPS.h",
+		"arguments": [
+			"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.38.33130\\bin\\Hostx64\\x64\\cl.exe",
+			"@C:\\Users\\Matt\\Documents\\Unreal Projects\\GravityFPS\\.vscode\\compileCommands_GravityFPS\\GravityFPS.1.rsp"
+		],
+		"directory": "F:\\Unreal\\UE_5.4\\Engine\\Source"
+	}
+]
