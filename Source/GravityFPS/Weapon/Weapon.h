@@ -86,7 +86,6 @@ public:
 
 	void EnableCustomDepth(bool Enable);
 	void SetCustomDepth(int32 StencilValue);
-
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -122,6 +121,9 @@ protected:
 
 	UPROPERTY(EditAnywhere)
 	float Damage = 20.f;
+
+	UPROPERTY(EditAnywhere)
+	float HeadshotMultiplier = 2.f;
 
 	UPROPERTY(Replicated, EditAnywhere)
 	bool bUseServerSideRewind;
@@ -207,10 +209,25 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Reload")
 	TSubclassOf<AMagazine> MagazineClass;
 
+	UPROPERTY(EditAnywhere)
+	FString WeaponName = "";
+
+	/*
+	* Recoil values
+	*/
+	UPROPERTY(EditAnywhere, Category = "Recoil")
+	float RecoilPitch = 0.5f;
+	UPROPERTY(EditAnywhere, Category = "Recoil")
+	float RecoilYaw = .1f;
+
+
+	UPROPERTY()
+	class AWeaponSpawnPoint* WeaponSpawnPoint;
 public:
 	void SetWeaponState(EWeaponState State);
 	void SetHUDAmmo();
 	void DestroyMag();
+	FORCEINLINE EWeaponState GetWeaponState() const { return WeaponState; }
 	FORCEINLINE bool IsEmpty() const { return Ammo <= 0; }
 	FORCEINLINE int32 GetAmmoLeft() const { return Ammo; }
 	FORCEINLINE int32 GetAmmoCapacity() const { return AmmoCapacity; }
@@ -222,4 +239,10 @@ public:
 	FORCEINLINE bool IsRL() const { return bIsRL; }
 	FORCEINLINE AMagazine* GetMagActor() { return MagazineActor; }
 	FORCEINLINE float GetDamage() const { return Damage; }
+	FORCEINLINE float GetHeadshotMultiplier() const { return HeadshotMultiplier; }
+	FORCEINLINE FString GetWeaponName() const { return WeaponName; }
+	FORCEINLINE float GetRecoilPitch() const { return RecoilPitch; }
+	FORCEINLINE float GetRecoilYaw() const { return RecoilYaw; }
+	FORCEINLINE void SetWeaponSpawnPoint(AWeaponSpawnPoint* SpawnPoint) { WeaponSpawnPoint = SpawnPoint; }
 };
+

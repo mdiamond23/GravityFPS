@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "GravityFPS/Types/TurningInPlace.h"
+#include "GravityFPS/Types/FlyingState.h"
 #include "PlayerAnimInstance.generated.h"
 
 /**
@@ -72,4 +73,7 @@ private:
 
 	UPROPERTY(BlueprintReadOnly, Category = Movement, meta = (AllowPrivateAccess = "true"))
 	bool bTransformRightHand;
+
+	UPROPERTY(BlueprintReadOnly, Category = Movement, meta = (AllowPrivateAccess = "true"))
+	EFlyingState FlyingState;
 };

@@ -16,6 +16,7 @@
 #include "Sound/SoundCue.h"
 #include "Sound/SoundWave.h"
 #include "GravityFPS/Weapon/Shotgun.h"
+#include "GravityFPS/Weapon/Projectile.h"
 
 // Sets default values for this component's properties
 UCombatComponent::UCombatComponent()
@@ -29,10 +30,6 @@ UCombatComponent::UCombatComponent()
 void UCombatComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
-	if (Character->HasAuthority()) {
-		InitialzeCarriedAmmo();
-	}
 }
 
 void UCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -57,6 +54,8 @@ void UCombatComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(UCombatComponent, SecondaryWeapon);
 	DOREPLIFETIME_CONDITION(UCombatComponent, CarriedAmmo, COND_OwnerOnly);
 	DOREPLIFETIME(UCombatComponent, CombatState);
+	DOREPLIFETIME(UCombatComponent, GravityPowerMultiplier);
+	DOREPLIFETIME(UCombatComponent, PowerupPowerMultiplier);
 }
 
 void UCombatComponent::SetAiming(bool bIsAiming)
@@ -134,6 +133,7 @@ void UCombatComponent::FireProjectileWeapon()
 		if (Character->IsLocallyControlled()) LocalFire(HitTarget);
 		if (!Character->HasAuthority()) ServerFire(HitTarget, EquippedWeapon->FireDelay);
 		else MulticastFire(HitTarget);
+		InitiateRecoil();
 	}
 }
 
@@ -144,6 +144,7 @@ void UCombatComponent::FireHitScanWeapon()
 		if (Character->IsLocallyControlled()) LocalFire(HitTarget);
 		if (!Character->HasAuthority()) ServerFire(HitTarget, EquippedWeapon->FireDelay);
 		else MulticastFire(HitTarget);
+		InitiateRecoil();
 	}
 }
 
@@ -156,6 +157,7 @@ void UCombatComponent::FireShotgun()
 		Shotgun->ShotgunTraceEndWithScatter(HitTarget, HitTargets);
 		if (!Character->HasAuthority()) ShotgunLocalFire(HitTargets);
 		ServerShotgunFire(HitTargets, Shotgun->FireDelay);
+		InitiateRecoil();
 	}
 }
 
@@ -180,6 +182,7 @@ void UCombatComponent::InitialzeCarriedAmmo()
 	CarriedAmmoMap.Emplace(EWeaponType::EWT_Small, StartingPistolAmmo);
 	CarriedAmmoMap.Emplace(EWeaponType::EWT_SniperRifle, StartingSniperAmmo);
 	CarriedAmmoMap.Emplace(EWeaponType::EWT_Shotgun, StartingShotgunAmmo);
+	if (Character) Character->UpdateHUDAmmo();
 }
 
 void UCombatComponent::UpdateAmmoValues()
@@ -283,11 +286,18 @@ void UCombatComponent::TraceUnderCrosshairs(FHitResult& TraceHitResult)
 
 		FHitResult Hit;
 
+		FCollisionQueryParams QueryParams;
+		if (Character)
+		{
+			QueryParams.AddIgnoredActor(Character);
+		}
+
 		bool bHit = GetWorld()->LineTraceSingleByChannel(
 			TraceHitResult,
 			Start,
 			End,
-			ECC_Visibility
+			ECC_Visibility,
+			QueryParams
 		);
 
 		if (!bHit) {
@@ -477,6 +487,8 @@ void UCombatComponent::EquipPrimaryWeapon(AWeapon* WeaponToEquip)
 		UpdateCarriedAmmo();
 		Controller = !Controller ? Cast<ACharacterPlayerController>(Character->Controller) : Controller;
 		if (Controller) Controller->SetHUDCarriedAmmo(CarriedAmmo);
+		BaseRecoilPitch = EquippedWeapon->GetRecoilPitch();
+		BaseRecoilYaw = EquippedWeapon->GetRecoilYaw();
 	}
 	PlayWeaponEquipSound(EquippedWeapon);
 	EquippedWeapon->ShowPickupWidget(false);
@@ -645,6 +657,8 @@ void UCombatComponent::MulticastSwapWeapons_Implementation()
 		EquippedWeapon->SetHUDAmmo();
 		UpdateCarriedAmmo();
 		PlayWeaponEquipSound(EquippedWeapon);
+		BaseRecoilPitch = EquippedWeapon->GetRecoilPitch();
+		BaseRecoilYaw = EquippedWeapon->GetRecoilYaw();
 	}
 }
 
@@ -658,6 +672,8 @@ void UCombatComponent::InitializeComponentReferences(APlayerCharacter* InCharact
 		DefaultFOV = Camera->FieldOfView;
 		CurrentFOV = DefaultFOV;
 	}
+
+	InitialzeCarriedAmmo();
 }
 
 void UCombatComponent::OnRep_EquippedWeapon()
@@ -710,6 +726,16 @@ void UCombatComponent::UpdateCarriedAmmo()
 	{
 		Controller->SetHUDCarriedAmmo(CarriedAmmo);
 	}
+}
+
+void UCombatComponent::InitiateRecoil()
+{
+	if (!EquippedWeapon || !Character || !Character->IsLocallyControlled()) return;
+
+	float FinalPitch = bAiming ? (BaseRecoilPitch * ADSRecoilMultiplier) : BaseRecoilPitch;
+	float FinalYawRange = bAiming ? (BaseRecoilYaw * ADSRecoilMultiplier) : BaseRecoilYaw;
+	float FinalYaw = FMath::RandRange(-FinalYawRange, FinalYawRange);
+	Character->ApplyRecoil(FinalPitch, FinalYaw);
 }
 
 bool UCombatComponent::ShouldSwapWeapons()

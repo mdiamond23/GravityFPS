@@ -57,6 +57,11 @@ void AProjectile::Tick(float DeltaTime)
 
 }
 
+void AProjectile::IgnoreOwner(APawn* MyOwner)
+{
+	if (MyOwner) CollisionBox->IgnoreActorWhenMoving(MyOwner, true);
+}
+
 void AProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
 	MulticastImpactFX(Hit.ImpactPoint, Hit.ImpactNormal.Rotation());

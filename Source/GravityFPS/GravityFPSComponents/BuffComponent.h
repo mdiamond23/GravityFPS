@@ -44,7 +44,7 @@ private:
 	float InitialBaseSpeed;
 
 	UFUNCTION(NetMulticast, Reliable)
-	void MulticastMovementBuff(float BaseSpeed);
+	void MulticastMovementBuff(float BaseSpeed, bool bStart);
 
 	
 
@@ -52,8 +52,7 @@ private:
 	void ResetPower();
 
 	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPowerBuff(float PowerBuff);
-
+	void MulticastPowerBuff(float PowerBuff, bool bStart);
 public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 };

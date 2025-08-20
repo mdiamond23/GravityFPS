@@ -15,6 +15,13 @@
 #include "GravityFPS/GameState/GravityFPSGameState.h"
 #include "GravityFPS/PlayerState/CharacterPlayerState.h"
 #include "Components/Image.h"
+#include "GravityFPS/HUD/ReturnToMainMenu.h"
+#include "EnhancedInputComponent.h"
+#include "InputAction.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
+#include "GravityFPS/HUD/DamageMarker.h"
+
 
 
 ACharacterPlayerController::ACharacterPlayerController()
@@ -215,6 +222,24 @@ void ACharacterPlayerController::SetHUDAnnouncementCountdown(float CountdownTime
 	}
 }
 
+void ACharacterPlayerController::SetHUDGravityBar(float Percent)
+{
+	PlayerHUD = !PlayerHUD ? Cast<APlayerHUD>(GetHUD()) : PlayerHUD;
+
+	bool bHUDValid = PlayerHUD &&
+		PlayerHUD->CharacterOverlay &&
+		PlayerHUD->CharacterOverlay->GravityBar;
+
+	if (bHUDValid) {
+		PlayerHUD->CharacterOverlay->GravityBar->SetPercent(Percent);
+	}
+	else {
+		bInitialzeGravity = true;
+		HUDGravity = Percent;
+	}
+}
+
+
 void ACharacterPlayerController::SetHUDTime(float DeltaTime)
 {
 	float TimeLeft = 0.f;
@@ -283,17 +308,35 @@ void ACharacterPlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
-	APlayerCharacter* PlayerCharacter = Cast<APlayerCharacter>(InPawn);
-
+	PlayerCharacter = Cast<APlayerCharacter>(InPawn);
 	if (PlayerCharacter) {
+		PlayerCharacter->StopCameraShake();
 		SetHUDHealth(PlayerCharacter->GetHealth(), PlayerCharacter->GetMaxHealth());
 		SetHUDShield(PlayerCharacter->GetShield(), PlayerCharacter->GetMaxShield());
 	}
 }
 
+void ACharacterPlayerController::OnUnPossess()
+{
+	if (PlayerCharacter)
+    {
+		PlayerCharacter->StopCameraShake();
+		PlayerCharacter = nullptr;
+    }
+    Super::OnUnPossess();
+}
+
 void ACharacterPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+		{
+			if (MenuMappingContext)
+				Subsystem->AddMappingContext(MenuMappingContext, 1);
+		}
+	}
 	PlayerHUD = Cast<APlayerHUD>(GetHUD());
 	ServerCheckMatchState();
 }
@@ -314,7 +357,6 @@ void ACharacterPlayerController::CheckPing(float DeltaTime)
 	if (HighPingRunningTime > CheckPingFrequency) {
 		if (PlayerState) {
 			float PingMs = PlayerState->GetPingInMilliseconds();
-			UE_LOG(LogTemp, Warning, TEXT("PingMs = %f"), PingMs);
 			if (PingMs > HighPingThreshold) {
 				HighPingWarning();
 				PingAnimationRunningTime = 0.f;
@@ -335,6 +377,85 @@ void ACharacterPlayerController::CheckPing(float DeltaTime)
 
 	if (PingAnimationRunningTime > HighPingDuration) {
 		StopHighPingWarning();
+	}
+}
+
+void ACharacterPlayerController::ShowReturnToMainMenu()
+{
+	if (!ReturnToMainMenuWidget) return;
+	if (!ReturnToMainMenu) {
+		ReturnToMainMenu = CreateWidget<UReturnToMainMenu>(this, ReturnToMainMenuWidget);
+	}
+	if (ReturnToMainMenu) {
+		bReturnToMainMenuOpen = !bReturnToMainMenuOpen;
+		if (bReturnToMainMenuOpen) {
+			ReturnToMainMenu->MenuSetup();
+		}
+		else {
+			ReturnToMainMenu->MenuTearDown();
+		}
+	}
+}
+
+void ACharacterPlayerController::BroadcastKill(APlayerState* AttackerPlayerState, APlayerState* VictimPlayerState, const FString& WeaponName)
+{
+	ClientKillAnnoucement(AttackerPlayerState, VictimPlayerState, WeaponName);
+}
+
+void ACharacterPlayerController::ShowDamageMarker(float DamageAmount, bool bShield)
+{
+	if (!DamageMarkerClass) return;
+
+	UDamageMarker* Marker = CreateWidget<UDamageMarker>(this, DamageMarkerClass);
+	if (!Marker || !Marker->DamageText || !Marker->Fade) return;
+
+	Marker->SetDamageAmount(DamageAmount);
+	Marker->DamageText->SetColorAndOpacity(bShield ? FLinearColor::Yellow : FLinearColor::Blue);
+
+	FVector2D ViewportSize;
+	if (GEngine && GEngine->GameViewport) {
+        GEngine->GameViewport->GetViewportSize(ViewportSize);
+		UE_LOG(LogTemp, Warning, TEXT("Viewport Size: %s"), *ViewportSize.ToString());
+	}
+
+	float XPos = ViewportSize.X * 0.505f;
+	float YPos = ViewportSize.Y * 0.425f;
+
+	Marker->AddToViewport();
+	Marker->SetPositionInViewport(FVector2D(XPos, YPos), true);
+
+	if (Marker->Fade)
+	{
+		Marker->PlayFadeAnimation();
+	}
+}
+
+void ACharacterPlayerController::ClientKillAnnoucement_Implementation(APlayerState* AttackerPlayerState, APlayerState* VictimPlayerState, const FString& WeaponName)
+{
+	APlayerState* Self = GetPlayerState<APlayerState>();
+
+	if (AttackerPlayerState && VictimPlayerState && Self)
+	{
+		PlayerHUD = !PlayerHUD ? Cast<APlayerHUD>(GetHUD()) : PlayerHUD;
+		if (PlayerHUD) {
+			if (AttackerPlayerState == Self && VictimPlayerState != Self) {
+				PlayerHUD->AddKillAnnoucement("You", VictimPlayerState->GetPlayerName(), WeaponName);
+				return;
+			}
+			else if (VictimPlayerState == Self && AttackerPlayerState != Self) {
+				PlayerHUD->AddKillAnnoucement(AttackerPlayerState->GetPlayerName(), "you", WeaponName);
+				return;
+			}
+			if (AttackerPlayerState == VictimPlayerState && AttackerPlayerState == Self) {
+				PlayerHUD->AddKillAnnoucement("You", "yourself", WeaponName);
+				return;
+			}
+			if (AttackerPlayerState == VictimPlayerState) {
+				PlayerHUD->AddKillAnnoucement(AttackerPlayerState->GetPlayerName(), "themselves", WeaponName);
+				return;
+			}
+			PlayerHUD->AddKillAnnoucement(AttackerPlayerState->GetPlayerName(), VictimPlayerState->GetPlayerName(), WeaponName);
+		}
 	}
 }
 
@@ -414,7 +535,7 @@ void ACharacterPlayerController::HandleCooldown()
 		}
 	}
 
-	APlayerCharacter* PlayerCharacter = Cast<APlayerCharacter>(GetPawn());
+	PlayerCharacter = !PlayerCharacter ? Cast<APlayerCharacter>(GetPawn()) : PlayerCharacter;
 	if (PlayerCharacter) {
 		PlayerCharacter->bDisableGameplay = true;
 		if (PlayerCharacter->GetCombat()) PlayerCharacter->GetCombat()->FireButtonPressed(false);
@@ -473,10 +594,26 @@ void ACharacterPlayerController::PollInit()
 				if (bInitializeDeaths) SetHUDDeaths(HUDDeaths);
 				if (bInitializeWeaponAmmo) SetHUDWeaponAmmo(HUDWeaponAmmo);
 				if (bInitializeCarriedAmmo) SetHUDCarriedAmmo(HUDCarriedAmmo);
+				if (bInitialzeGravity) SetHUDGravityBar(HUDGravity);
 			}
 		}
 	}
 }
+
+void ACharacterPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+
+	if (!InputComponent) return;
+	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
+	{
+		if (QuitAction)
+		{
+			EnhancedInputComponent->BindAction(QuitAction, ETriggerEvent::Started, this, &ACharacterPlayerController::ShowReturnToMainMenu);
+		}
+	}
+}
+
 
 void ACharacterPlayerController::ServerRequestServerTime_Implementation(float TimeOfClientRequest)
 {

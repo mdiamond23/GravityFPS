@@ -37,25 +37,45 @@ void AProjectileBullet::PostEditChangeProperty(FPropertyChangedEvent& Event)
 void AProjectileBullet::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalInpulse, const FHitResult& Hit)
 {
 	APlayerCharacter* OwnerCharacter = Cast<APlayerCharacter>(GetOwner());
-	if (OwnerCharacter) {
-		ACharacterPlayerController* OwnerController = Cast<ACharacterPlayerController>(OwnerCharacter->Controller);
-		if (OwnerController) {
-			if (OwnerCharacter->HasAuthority() && !bUseServerSideRewind) {
-				UGameplayStatics::ApplyDamage(OtherActor, Damage, OwnerController, this, UDamageType::StaticClass());
-				Super::OnHit(HitComp, OtherActor, OtherComp, NormalInpulse, Hit);
-				return;
-			}
-			APlayerCharacter* HitCharacter = Cast<APlayerCharacter>(OtherActor);
-			if (bUseServerSideRewind && OwnerCharacter->GetLagCompensation() && OwnerCharacter->IsLocallyControlled() && HitCharacter) {
-				OwnerCharacter->GetLagCompensation()->ProjectileServerScoreRequest(
-					HitCharacter,
-					TraceStart,
-					InitialVelocity,
-					OwnerController->GetServerTime() - OwnerController->SingleTripTime
-				);
-			}
+	if (!OwnerCharacter) {
+		Super::OnHit(HitComp, OtherActor, OtherComp, NormalInpulse, Hit);
+		return;
+	}
+
+	ACharacterPlayerController* OwnerController = Cast<ACharacterPlayerController>(OwnerCharacter->Controller);
+
+	APlayerCharacter* HitCharacter = Cast<APlayerCharacter>(OtherActor);
+
+	const float DamageToCause = Hit.BoneName.ToString() == FString("head") ? Damage * HeadshotMultiplier : Damage;
+	if (OwnerCharacter && OwnerCharacter->IsLocallyControlled())
+	{
+		ACharacterPlayerController* ShooterController = Cast<ACharacterPlayerController>(OwnerCharacter->Controller);
+		APlayerCharacter* Victim = Cast<APlayerCharacter>(OtherActor);
+		if (ShooterController && Victim)
+		{
+			bool bVictimHasShield = Victim->GetShield() > 0.f;
+			ShooterController->ShowDamageMarker(DamageToCause, bVictimHasShield);
 		}
-			
+	}
+
+	// Send signal to spawn hit marker
+	// Non-SSR, direct damage, only on server
+	if (HasAuthority() && !bUseServerSideRewind) {
+		UGameplayStatics::ApplyDamage(OtherActor, DamageToCause, OwnerController, this, UDamageType::StaticClass());
+		Super::OnHit(HitComp, OtherActor, OtherComp, NormalInpulse, Hit);
+		return;
+	}
+
+	// SSR branch -- only locally controlled client fires SSR request!
+	else if (bUseServerSideRewind && OwnerCharacter->IsLocallyControlled() && HitCharacter && OwnerCharacter->GetLagCompensation()) {
+		if (OwnerController) {
+			OwnerCharacter->GetLagCompensation()->ProjectileServerScoreRequest(
+				HitCharacter,
+				TraceStart,
+				InitialVelocity,
+				OwnerController->GetServerTime() - OwnerController->SingleTripTime
+			);
+		}
 	}
 
 	Super::OnHit(HitComp, OtherActor, OtherComp, NormalInpulse, Hit);
@@ -64,23 +84,4 @@ void AProjectileBullet::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 void AProjectileBullet::BeginPlay()
 {
 	Super::BeginPlay();
-
-	/*
-	FPredictProjectilePathParams PathParams;
-	PathParams.bTraceWithChannel = true;
-	PathParams.bTraceWithCollision = true;
-	PathParams.DrawDebugTime = 5.f;
-	PathParams.DrawDebugType = EDrawDebugTrace::ForDuration;
-	PathParams.LaunchVelocity = GetActorForwardVector() * InitialSpeed;
-	PathParams.MaxSimTime = 4.f;
-	PathParams.ProjectileRadius = 5.f;
-	PathParams.SimFrequency = 30.f;
-	PathParams.StartLocation = GetActorLocation();
-	PathParams.TraceChannel = ECollisionChannel::ECC_Visibility;
-	PathParams.ActorsToIgnore.Add(this);
-
-	FPredictProjectilePathResult PathResult;
-
-	UGameplayStatics::PredictProjectilePath(this, PathParams, PathResult);
-	*/
 }

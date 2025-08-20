@@ -25,6 +25,11 @@
 #include "GravityFPS/GravityFPSComponents/BuffComponent.h"
 #include "Components/BoxComponent.h"
 #include "GravityFPS/GravityFPSComponents/LagCompensationComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraComponent.h"
+#include "GravityFPS/GameState/GravityFPSGameState.h"
+#include "Kismet/GameplayStatics.h"
+#include "GravityFPS/Weapon/Projectile.h"
 
 
 // Sets default values
@@ -53,8 +58,8 @@ APlayerCharacter::APlayerCharacter()
 	//CurrHealth = MaxHealth;
 
 
-	OverheadWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("OverheadWidget"));
-	OverheadWidget->SetupAttachment(RootComponent);
+	//OverheadWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("OverheadWidget"));
+	//OverheadWidget->SetupAttachment(RootComponent);
 
 	Combat = CreateDefaultSubobject<UCombatComponent>(TEXT("CombatComponent"));
 	Combat->SetIsReplicated(true);
@@ -155,6 +160,26 @@ APlayerCharacter::APlayerCharacter()
 			Box.Value->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
 	}
+
+	BuffSpawnPoint = CreateDefaultSubobject<USceneComponent>(TEXT("BuffSpawnPoint"));
+	BuffSpawnPoint->SetupAttachment(GetMesh(), FName("spine_03"));
+	BuffSpawnPoint->SetRelativeLocation(FVector::ZeroVector);
+
+	// --- Movement Buff Effect ---
+	MovementBuffEffectComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("MovementBuffEffect"));
+	MovementBuffEffectComponent->SetupAttachment(BuffSpawnPoint); // or to a socket/bone if you prefer
+	MovementBuffEffectComponent->SetAutoActivate(false); // Only activate on buff
+	// Don't set the asset here, do it in BeginPlay
+
+	// --- Power Buff Effect ---
+	PowerBuffEffectComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("PowerBuffEffect"));
+	PowerBuffEffectComponent->SetupAttachment(BuffSpawnPoint); // or to a different socket/bone if desired
+	PowerBuffEffectComponent->SetAutoActivate(false);
+
+	ThrusterPSC = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("ThrusterPSC"));
+	ThrusterPSC->SetupAttachment(GetMesh(), TEXT("spine_03")); 
+	ThrusterPSC->bAutoActivate = false; 
+	ThrusterPSC->SetRelativeLocation(FVector(0, 0, 0));
 }
 
 void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -168,6 +193,8 @@ void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(APlayerCharacter, Health);
 	DOREPLIFETIME(APlayerCharacter, Shield);
 	DOREPLIFETIME(APlayerCharacter, bDisableGameplay);
+	DOREPLIFETIME(APlayerCharacter, FlyingState);
+	DOREPLIFETIME(APlayerCharacter, LastDamager)
 }
 
 // Called when the game starts or when spawned
@@ -190,6 +217,23 @@ void APlayerCharacter::BeginPlay()
 
 	if (HasAuthority()) {
 		OnTakeAnyDamage.AddDynamic(this, &APlayerCharacter::RecieveDamage);
+		if (GetCapsuleComponent()) {
+			GetCapsuleComponent()->OnComponentBeginOverlap.AddDynamic(this, &APlayerCharacter::OnBeginOverlap);
+		}
+	}
+
+	if (MovementBuffEffectComponent && MovementBuffEffectSystem)
+	{
+		MovementBuffEffectComponent->SetAsset(MovementBuffEffectSystem);
+	}
+	if (PowerBuffEffectComponent && PowerBuffEffectSystem)
+	{
+		PowerBuffEffectComponent->SetAsset(PowerBuffEffectSystem);
+	}
+
+	if (ThursterVFX && ThrusterPSC)
+	{
+		ThrusterPSC->SetTemplate(ThursterVFX);
 	}
 }
 
@@ -220,12 +264,76 @@ void APlayerCharacter::UpdateHUDAmmo()
 
 void APlayerCharacter::SpawnDefaultWeapon()
 {
-	//AGravityFPSGamemode* 
 	UWorld* World = GetWorld();
 	if (World && HasAuthority() && DefaultWeaponClass && !bKilled) {
 		AWeapon* StartingWeapon = World->SpawnActor<AWeapon>(DefaultWeaponClass);
 		StartingWeapon->bDestroyWeapon = true;
-		if (Combat) Combat->EquipWeapon(StartingWeapon);
+		if (Combat) {
+			Combat->EquipWeapon(StartingWeapon);
+			if (Combat->EquippedWeapon && IsLocallyControlled()) {
+				Combat->BaseRecoilPitch = Combat->EquippedWeapon->GetRecoilPitch();
+				Combat->BaseRecoilYaw = Combat->EquippedWeapon->GetRecoilYaw();
+			}
+		}
+	}
+}
+
+void APlayerCharacter::ActivateMovementBuffEffect()
+{
+	if (MovementBuffEffectComponent)
+	{
+		MovementBuffEffectComponent->Activate(true);
+	}
+}
+
+void APlayerCharacter::DeactivateMovementBuffEffect()
+{
+	if (MovementBuffEffectComponent)
+	{
+		MovementBuffEffectComponent->Deactivate();
+	}
+}
+
+void APlayerCharacter::ActivatePowerBuffEffect()
+{
+	if (PowerBuffEffectComponent)
+	{
+		PowerBuffEffectComponent->Activate(true);
+	}
+}
+
+void APlayerCharacter::DeactivatePowerBuffEffect()
+{
+	if (PowerBuffEffectComponent)
+	{
+		PowerBuffEffectComponent->Deactivate();
+	}
+}
+
+
+void APlayerCharacter::MulticastGainedTheLead_Implementation()
+{
+	if (!CrownSystem) return;
+	if (!CrownSystemComponent) {
+		CrownSystemComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			CrownSystem,
+			GetCapsuleComponent(),
+			FName(),
+			GetActorLocation() + FVector(0.f, 0.f, 110.f),
+			GetActorRotation(),
+			EAttachLocation::KeepWorldPosition,
+			false
+		);
+	}
+	if (CrownSystemComponent) {
+		CrownSystemComponent->Activate();
+	}
+}
+
+void APlayerCharacter::MulticastLostTheLead_Implementation()
+{
+	if (CrownSystemComponent) {
+		CrownSystemComponent->DestroyComponent();
 	}
 }
 
@@ -255,8 +363,12 @@ void APlayerCharacter::Tick(float DeltaTime)
 		SimProxiesTurn();
 	}
 
+	ResetRecoilOffset(DeltaTime);
+
 	HideCameraIfCharacterClose();
 	PollInit();
+
+	if (IsLocallyControlled()) DrawGravityBar();
 }
 
 // Called to bind functionality to input
@@ -271,10 +383,12 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		if (LookAction) {
 			EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
 		}
+		/*
 		if (JumpAction) {
 			EnhancedInput->BindAction(JumpAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Jump);
 			EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopJumping);
 		}
+		*/
 		if (ShootAction) {
 			EnhancedInput->BindAction(ShootAction, ETriggerEvent::Started, this, &APlayerCharacter::PullTrigger);
 			EnhancedInput->BindAction(ShootAction, ETriggerEvent::Completed, this, &APlayerCharacter::ReleaseTrigger);
@@ -292,6 +406,13 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		if (ReloadAction) {
 			EnhancedInput->BindAction(ReloadAction, ETriggerEvent::Started, this, &APlayerCharacter::Reload);
 		}
+		if (FlyAction) {
+			EnhancedInput->BindAction(FlyAction, ETriggerEvent::Started, this, &APlayerCharacter::ChangeFlyingState);
+		}
+		if (FallAction) {
+			EnhancedInput->BindAction(FallAction, ETriggerEvent::Started, this, &APlayerCharacter::Fall);
+		}
+		// Add gravity input
 	}
 }
 
@@ -419,6 +540,15 @@ void APlayerCharacter::Reload()
 	if (Combat) Combat->Reload();
 }
 
+void APlayerCharacter::Fall()
+{
+	if (bDisableGameplay) return;
+	if (IsLocallyControlled() && !HasAuthority()) {
+		ResetFlying();
+	}
+	ServerResetFlying();
+}
+
 void APlayerCharacter::RecieveDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType, AController* InstigatorController, AActor* DamageCauser)
 {
 	float DamageToHealth = Damage;
@@ -443,6 +573,17 @@ void APlayerCharacter::RecieveDamage(AActor* DamagedActor, float Damage, const U
 			GravityFPSGamemode->PlayerKilled(this, CharacterPlayerController, AttackerController);
 		}
 	}
+	else if (InstigatorController && InstigatorController){
+		LastDamager = Cast<ACharacterPlayerController>(InstigatorController);
+
+		GetWorldTimerManager().ClearTimer(LastDamagerResetTimer); // Clear any existing timer
+		GetWorldTimerManager().SetTimer(
+			LastDamagerResetTimer,
+			this,
+			&APlayerCharacter::ClearLastDamager,
+			LastDamagerResetTime
+		);
+	}
 }
 
 bool APlayerCharacter::isLocallyReloading() const
@@ -459,6 +600,12 @@ ECombatState APlayerCharacter::GetCombatState() const
 AWeapon* APlayerCharacter::GetWeapon() const
 {
 	return Combat == nullptr ? nullptr : Combat->EquippedWeapon;
+}
+
+FString APlayerCharacter::GetWeaponName() const
+{
+	if (!Combat || !Combat->EquippedWeapon) return FString(TEXT("None"));
+	return Combat->EquippedWeapon->GetWeaponName();
 }
 
 void APlayerCharacter::SetOverlappingWeapon(AWeapon* Weapon)
@@ -586,22 +733,19 @@ FVector APlayerCharacter::GetHitTarget() const
 	return Combat->HitTarget;
 }
 
-void APlayerCharacter::Die()
+void APlayerCharacter::Die(bool bPlayerLeftGame)
 {
 	if (bKilled) return;
+
+
+	//if (HasAuthority()) MulticastResetGravityTimer();
 
 	if (Combat) {
 		DropOrDestoryWeapon(Combat->EquippedWeapon);
 		DropOrDestoryWeapon(Combat->SecondaryWeapon);
 	}
 
-	MulticastDie();
-	GetWorldTimerManager().SetTimer(
-		DeadTimer,
-		this,
-		&APlayerCharacter::DeadTimerFinished,
-		DeadDelay
-	);
+	MulticastDie(bPlayerLeftGame);
 }
 
 void APlayerCharacter::DropOrDestoryWeapon(AWeapon* Weapon)
@@ -617,11 +761,18 @@ void APlayerCharacter::DropOrDestoryWeapon(AWeapon* Weapon)
 	}
 }
 
-void APlayerCharacter::MulticastDie_Implementation()
+void APlayerCharacter::MulticastDie_Implementation(bool bPlayerLeftGame)
 {
+	UE_LOG(LogTemp, Warning, TEXT("MulticastDie_Implementation: bPlayerLeftGame=%d, IsLocallyControlled=%d"), bPlayerLeftGame, IsLocallyControlled());
+	bLeftGame = bPlayerLeftGame;
+
+	if (IsLocallyControlled()) {
+		StopCameraShake();
+	}
 	if (CharacterPlayerController) {
 		CharacterPlayerController->SetHUDWeaponAmmo(0);
 	}
+
 	bKilled = true;
 	PlayDeathMontage(isAiming());
 	
@@ -656,14 +807,41 @@ void APlayerCharacter::MulticastDie_Implementation()
 		Combat->EquippedWeapon->GetWeaponType() == EWeaponType::EWT_SniperRifle;
 	if (StopShowingScope)
 		ShowSniperScopeWidget(false);
+
+	if (CrownSystemComponent) {
+		CrownSystemComponent->DestroyComponent();
+	}
+
+	GetWorldTimerManager().SetTimer(
+		DeadTimer,
+		this,
+		&APlayerCharacter::DeadTimerFinished,
+		DeadDelay
+	);
 }
 
 void APlayerCharacter::DeadTimerFinished()
 {
+	UE_LOG(LogTemp, Warning, TEXT("DeadTimerFinished: bLeftGame=%d, IsLocallyControlled=%d"), bLeftGame, IsLocallyControlled());
 	AGravityFPSGamemode* GravityFPSGamemode = GetWorld()->GetAuthGameMode<AGravityFPSGamemode>();
 
-	if (GravityFPSGamemode) {
+	if (GravityFPSGamemode && !bLeftGame) {
 		GravityFPSGamemode->RequestRespawn(this, Controller);
+	} if (bLeftGame && IsLocallyControlled()) {
+		UE_LOG(LogTemp, Warning, TEXT("Broadcasting OnLeftGame in DeadTimerFinished"));
+		OnLeftGame.Broadcast();
+	}
+}
+
+void APlayerCharacter::ServerLeaveGame_Implementation()
+{
+	UE_LOG(LogTemp, Warning, TEXT("ServerLeaveGame_Implementation called"));
+	AGravityFPSGamemode* GravityFPSGamemode = GetWorld()->GetAuthGameMode<AGravityFPSGamemode>();
+	CharacterPlayerState = !CharacterPlayerState ? GetPlayerState<ACharacterPlayerState>() : CharacterPlayerState;
+	if (GravityFPSGamemode && CharacterPlayerState) {
+		{
+			GravityFPSGamemode->PlayerLeftGame(CharacterPlayerState);
+		}
 	}
 }
 
@@ -728,6 +906,263 @@ void APlayerCharacter::AttachMagToGun()
 	);
 }
 
+
+void APlayerCharacter::ChangeFlyingState()
+{
+	if (bDisableGameplay || !bCanGravity) return;
+	bool callLocally = !HasAuthority() && IsLocallyControlled();
+	switch (FlyingState)
+	{
+	case EFlyingState::EFS_Idle:
+		if (callLocally) InitiateHover();
+		ServerInitiateHover();
+		break;
+	case EFlyingState::EFS_Hovering:
+		if (callLocally) InitiateFlying();
+		ServerInitiateFlying();
+		break;
+	case EFlyingState::EFS_Flying:
+		if (callLocally) InitiateHover();
+		ServerInitiateHover();
+		break;
+	}
+}
+
+void APlayerCharacter::OnRep_FlyingState()
+{
+	if (!IsLocallyControlled())	return;
+	switch (FlyingState)
+	{
+	case EFlyingState::EFS_Idle: ResetFlying(); break;
+	case EFlyingState::EFS_Hovering: InitiateHover(); break;
+	case EFlyingState::EFS_Flying: InitiateFlying(); break;
+	}
+}
+
+void APlayerCharacter::InitiateHover()
+{
+	UCharacterMovementComponent* CM = GetCharacterMovement();
+	if (!CM) return;
+	if (!CM->IsFalling()) { // Launch Player Up
+		CM->Launch(HoverLaunchVelocity);
+	}
+
+	CM->Velocity *= .4f;
+	CM->GravityScale = .12f; // needs tweaks.
+
+	if (Combat) {
+		Combat->SetGravityPowerMultiplier(2.f);
+	}
+
+	if (IsLocallyControlled())
+	{
+		StopCameraShake();
+	}
+
+	if (ThursterVFX && ThrusterPSC)
+	{
+		ThrusterPSC->Deactivate();
+	}
+
+	if (!GetWorldTimerManager().IsTimerActive(GravityTimer)) {
+		StartGravityTimer();
+	}
+}
+
+void APlayerCharacter::InitiateFlying()
+{
+	UCharacterMovementComponent* CM = GetCharacterMovement();
+	if (!CM || !GetCamera()) return;
+
+	// Direction Change
+	FVector NewGravityDirection = GetCamera()->GetForwardVector();
+	CM->SetGravityDirection(NewGravityDirection);
+	CM->GravityScale = 1.f;
+	CM->Velocity += CM->GetGravityDirection() * InitialFlyingKick;
+
+	if (Combat) {
+		Combat->SetGravityPowerMultiplier(4.f);
+	}
+
+	if (IsLocallyControlled()) 
+	{
+		StartCameraShake();
+	}
+
+	if (ThrusterPSC)
+	{		
+			FVector GravityDir = GetCharacterMovement()->GetGravityDirection();
+			FVector Up = -GravityDir;
+			FRotator Rot = Up.Rotation();
+			ThrusterPSC->SetWorldRotation(Rot);
+			ThrusterPSC->Activate();
+	}
+	
+}
+
+void APlayerCharacter::ResetFlying()
+{
+	UCharacterMovementComponent* CM = GetCharacterMovement();
+	if (!CM || bDisableGameplay) return;
+
+	CM->GravityScale = 1.f;
+	CM->SetGravityDirection(FVector(0.f, 0.f, -1.f)); // base gravity direction
+
+	if (Combat) {
+		Combat->SetGravityPowerMultiplier(1.f);
+	}
+
+	if (IsLocallyControlled())
+	{
+		StopCameraShake();
+	}
+
+	if (ThrusterPSC)
+	{
+		ThrusterPSC->Deactivate();
+	}
+}
+
+void APlayerCharacter::ServerInitiateHover_Implementation()
+{
+	FlyingState = EFlyingState::EFS_Hovering;
+	MulticastInitiateHover();
+	OnRep_FlyingState();
+}
+
+void APlayerCharacter::ServerInitiateFlying_Implementation()
+{
+	FlyingState = EFlyingState::EFS_Flying;
+	MulticastInitiateFlying();
+	OnRep_FlyingState();
+}
+
+void APlayerCharacter::ServerResetFlying_Implementation()
+{
+	FlyingState = EFlyingState::EFS_Idle;
+	MulticastResetFlying();
+	OnRep_FlyingState();
+}
+
+void APlayerCharacter::MulticastInitiateHover_Implementation()
+{
+	InitiateHover();
+}
+
+void APlayerCharacter::MulticastInitiateFlying_Implementation()
+{
+	InitiateFlying();
+}
+
+void APlayerCharacter::MulticastResetFlying_Implementation()
+{
+	ResetFlying();
+}
+
+void APlayerCharacter::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPrimitiveComponent* OtherComp, bool bSelfMoved, FVector HitLocation, FVector HitNormal, FVector NormalImpulse, const FHitResult& Hit)
+{
+	Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved, HitLocation, HitNormal, NormalImpulse, Hit);
+
+	if (Other && Other->IsA(AProjectile::StaticClass())) return;
+
+	bCanGravity = true;
+	if (GetWorldTimerManager().IsTimerActive(GravityTimer)) {
+		GetWorldTimerManager().ClearTimer(GravityTimer);
+		if (CharacterPlayerController) {
+			CharacterPlayerController->SetHUDGravityBar(1.f);
+		}
+	}
+    if (FlyingState != EFlyingState::EFS_Idle)
+    {
+		if (HasAuthority())
+		{
+			FlyingState = EFlyingState::EFS_Idle;
+		}
+		else if (IsLocallyControlled())
+		{
+			ResetFlying();
+		}
+		ServerResetFlying();
+    }
+}
+
+void APlayerCharacter::GravityTimerFinished()
+{
+	Fall();
+	bCanGravity = false;
+	if (IsLocallyControlled()) StopCameraShake();
+}
+
+void APlayerCharacter::DrawGravityBar()
+{
+	CharacterPlayerController = !CharacterPlayerController ? Cast<ACharacterPlayerController>(Controller) : CharacterPlayerController;
+	if (!CharacterPlayerController) return;
+	float Percent = 0.f;
+	if (GetWorldTimerManager().IsTimerActive(GravityTimer))
+	{
+		float TimeRemaining = GetWorldTimerManager().GetTimerRemaining(GravityTimer);
+		Percent = TimeRemaining / GravityTime;
+	}
+	else
+	{
+		Percent = bCanGravity? 1.f : 0.f;
+	}
+	CharacterPlayerController->SetHUDGravityBar(Percent);
+}
+
+void APlayerCharacter::OnBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (OtherActor && OtherActor->ActorHasTag("DeathVolume"))
+	{
+		// Use PlayerKilled to handle the death event!
+		AGravityFPSGamemode* GameMode = GetWorld()->GetAuthGameMode<AGravityFPSGamemode>();
+		if (GameMode)
+		{
+			// Pass nullptr as AttackerController (no attacker for environment death)
+			GameMode->PlayerKilled(this,
+				Cast<ACharacterPlayerController>(Controller), // Victim
+				LastDamager // No attacker
+			);
+		}
+	}
+}
+
+void APlayerCharacter::StartCameraShake()
+{
+	if (!FlyingCameraShakeClass) return;
+	if (APlayerController* PC = Cast<APlayerController>(Controller)) {
+		if (!FlyingShakeInstance)
+		{
+			FlyingShakeInstance = PC->PlayerCameraManager->StartCameraShake(FlyingCameraShakeClass, 1.f);
+		}
+	}
+}
+
+void APlayerCharacter::StopCameraShake()
+{
+	if (APlayerController* PC = Cast<APlayerController>(Controller)) {
+		if (FlyingShakeInstance) {
+			PC->PlayerCameraManager->StopCameraShake(FlyingShakeInstance, false);
+			UE_LOG(LogTemp, Warning, TEXT("Stopped camera shake instance %p"), FlyingShakeInstance);
+			FlyingShakeInstance = nullptr;
+		}
+		if (FlyingCameraShakeClass) {
+			PC->PlayerCameraManager->StopAllInstancesOfCameraShake(FlyingCameraShakeClass, false);
+			UE_LOG(LogTemp, Warning, TEXT("Stopped all camera shakes of class %s"), *FlyingCameraShakeClass->GetName());
+		}
+	}
+}
+
+void APlayerCharacter::SetLastDamager(ACharacterPlayerController* InController)
+{
+	LastDamager = InController;
+}
+
+void APlayerCharacter::ClearLastDamager()
+{
+	LastDamager = nullptr;
+}
+
 void APlayerCharacter::OnRep_OverlapingWeapon(AWeapon* LastWeapon)
 {
 	if (IsValid(OverlappingWeapon))
@@ -735,6 +1170,24 @@ void APlayerCharacter::OnRep_OverlapingWeapon(AWeapon* LastWeapon)
 
 	if (IsValid(LastWeapon))
 		LastWeapon->ShowPickupWidget(false);
+}
+
+void APlayerCharacter::ResetRecoilOffset(float DeltaTime)
+{
+	if (!IsLocallyControlled() || bDisableGameplay) return;
+
+	if (RecoilOffset.X != 0.f) {
+		float OldYaw = RecoilOffset.X;
+		RecoilOffset.X = FMath::FInterpTo(RecoilOffset.X, 0.f, DeltaTime, RecoilRecoverySpeed);
+		float DeltaYaw = RecoilOffset.X - OldYaw;
+		AddControllerYawInput(DeltaYaw);
+	}
+	if (RecoilOffset.Y != 0.f) {
+		float OldPitch = RecoilOffset.Y;
+		RecoilOffset.Y = FMath::FInterpTo(RecoilOffset.Y, 0.f, DeltaTime, RecoilRecoverySpeed);
+		float DeltaPitch = RecoilOffset.Y - OldPitch;
+		AddControllerPitchInput(-DeltaPitch);
+	}
 }
 
 void APlayerCharacter::AimOffset(float DeltaTime)
@@ -815,6 +1268,52 @@ void APlayerCharacter::PollInit()
 			CharacterPlayerState->AddToDeaths(0);
 		}
 	}
+
+	AGravityFPSGameState* GravityFPSGameState = Cast<AGravityFPSGameState>(UGameplayStatics::GetGameState(this));
+	if (GravityFPSGameState && GravityFPSGameState->TopScoringPlayers.Contains(CharacterPlayerState)) {
+		MulticastGainedTheLead();
+	}
+}
+
+void APlayerCharacter::ApplyRecoil(float Pitch, float Yaw)
+{
+	if (!IsLocallyControlled() || bDisableGameplay) return;
+	AddControllerPitchInput(-Pitch);
+	AddControllerYawInput(Yaw);
+	RecoilOffset.X += Yaw;
+	RecoilOffset.Y += Pitch;
+}
+
+void APlayerCharacter::StartGravityTimer()
+{
+	GetWorldTimerManager().SetTimer(
+		GravityTimer,
+		this,
+		&APlayerCharacter::GravityTimerFinished,
+		GravityTime
+	);
+}
+
+void APlayerCharacter::ResetGravityTimer()
+{
+	bCanGravity = true;
+	if (GetWorldTimerManager().IsTimerActive(GravityTimer)) {
+		GetWorldTimerManager().ClearTimer(GravityTimer);
+		StartGravityTimer();	
+		if (CharacterPlayerController) {
+			CharacterPlayerController->SetHUDGravityBar(1.f);
+		}
+	}
+
+	if (IsLocallyControlled() && FlyingState == EFlyingState::EFS_Flying) {
+		StopCameraShake();
+		StartCameraShake();
+	}
+}
+
+void APlayerCharacter::MulticastResetGravityTimer_Implementation()
+{
+	ResetGravityTimer();
 }
 
 void APlayerCharacter::TurnInPlace(float DeltaTime)
@@ -868,16 +1367,31 @@ void APlayerCharacter::HideCameraIfCharacterClose()
 {
 	if (!IsLocallyControlled()) return;
 
+	bool MeshesValid = 
+		Combat && 
+		Combat->EquippedWeapon && 
+		Combat->EquippedWeapon->GetWeaponMesh() && 
+		Combat->EquippedWeapon->GetMagActor() && 
+		Combat->EquippedWeapon->GetMagActor()->MagMesh &&
+		Combat->SecondaryWeapon &&
+		Combat->SecondaryWeapon->GetWeaponMesh()
+		&& Combat->SecondaryWeapon->GetMagActor() && 
+		Combat->SecondaryWeapon->GetMagActor()->MagMesh;
+
 	if ((FollowCamera->GetComponentLocation() - GetActorLocation()).Size() < CameraCloseThreshold) {
 		GetMesh()->SetVisibility(false);
-		if (Combat && Combat->EquippedWeapon && Combat->EquippedWeapon->GetWeaponMesh()) {
+		if (MeshesValid) {
 			Combat->EquippedWeapon->GetWeaponMesh()->bOwnerNoSee = true;
+			Combat->SecondaryWeapon->GetWeaponMesh()->bOwnerNoSee = true;
+			Combat->EquippedWeapon->GetMagActor()->MagMesh->bOwnerNoSee = true;
 		}
 	}
 	else {
 		GetMesh()->SetVisibility(true);
-		if (Combat && Combat->EquippedWeapon && Combat->EquippedWeapon->GetWeaponMesh()) {
+		if (MeshesValid) {
 			Combat->EquippedWeapon->GetWeaponMesh()->bOwnerNoSee = false;
+			Combat->SecondaryWeapon->GetWeaponMesh()->bOwnerNoSee = false;
+			Combat->EquippedWeapon->GetMagActor()->MagMesh->bOwnerNoSee = false;
 		}
 	}
 }

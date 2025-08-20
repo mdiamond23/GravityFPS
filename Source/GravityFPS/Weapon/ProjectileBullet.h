@@ -23,4 +23,5 @@ public:
 protected:
 	virtual void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalInpulse, const FHitResult& Hit) override;
 	virtual void BeginPlay() override;
+
 };

@@ -30,4 +30,5 @@ private:
 
 	UPROPERTY(EditAnywhere)
 	float MovementBuffTime = 15.f;
+
 };

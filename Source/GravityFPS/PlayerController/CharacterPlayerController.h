@@ -26,7 +26,9 @@ public:
 	void SetHUDCarriedAmmo(int32 Ammo);
 	void SetHUDMatchCountdown(float CountdownTime, float DeltaTime);
 	void SetHUDAnnouncementCountdown(float CountdownTime);
+	void SetHUDGravityBar(float Percent);
 	virtual void OnPossess(APawn* InPawn) override;
+	virtual void OnUnPossess() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -38,10 +40,14 @@ public:
 
 	float SingleTripTime = 0.f;
 	FHighPingDelegate HighPingDelegate;
+
+	void BroadcastKill(APlayerState* AttackerPlayerState, APlayerState* VictimPlayerState, const FString& WeaponName);
+	void ShowDamageMarker(float DamageAmout, bool bShield);
 protected:
 	virtual void BeginPlay() override;
 	void SetHUDTime(float DeltaTime);
 	void PollInit();
+	virtual void SetupInputComponent() override;
 	/*
 	* Sync time between client and server
 	*/
@@ -72,7 +78,27 @@ protected:
 	void HighPingWarning();
 	void StopHighPingWarning();
 	void CheckPing(float DeltaTime);
+	void ShowReturnToMainMenu();
+
+	UFUNCTION(Client, Reliable)
+	void ClientKillAnnoucement(APlayerState* AttackerPlayerState, APlayerState* VictimPlayerState, const FString& WeaponName);
+
+	void ResetGravityTimer();
 private:
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	class UInputAction* QuitAction;
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputMappingContext* MenuMappingContext;
+
+	UPROPERTY(EditAnywhere, Category = "HUD")
+	TSubclassOf<class UUserWidget> ReturnToMainMenuWidget;
+	UPROPERTY()
+	class UReturnToMainMenu* ReturnToMainMenu;
+	bool bReturnToMainMenuOpen = false;
+
+	UPROPERTY(EditAnywhere, Category = Effects)
+	TSubclassOf<class UDamageMarker> DamageMarkerClass;
+	
 	UPROPERTY()
 	class APlayerHUD* PlayerHUD;
 	UPROPERTY()
@@ -100,6 +126,7 @@ private:
 	float HUDShield;
 	float HUDMaxShield;
 	float HUDScore;
+	float HUDGravity;
 	int32 HUDDeaths;
 	int32 HUDWeaponAmmo;
 	int32 HUDCarriedAmmo;
@@ -110,6 +137,7 @@ private:
 	bool bInitializeDeaths = false;
 	bool bInitializeWeaponAmmo = false;
 	bool bInitializeCarriedAmmo = false;
+	bool bInitialzeGravity = false;
 
 	FSlateColor RedColor;
 	FSlateColor WhiteColor;
@@ -124,6 +152,13 @@ private:
 	float CheckPingFrequency = 20.f;
 	UPROPERTY(EditAnywhere)
 	float HighPingThreshold = 120.f;
+
+	UPROPERTY()
+	UMaterialInstanceDynamic* GravityBarMID;
+
+	UPROPERTY()
+	class APlayerCharacter* PlayerCharacter;
+
 };
 
  

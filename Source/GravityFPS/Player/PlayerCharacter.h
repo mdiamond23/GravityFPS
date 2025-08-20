@@ -7,6 +7,7 @@
 #include "GravityFPS/Interfaces/InteractWithCrosshairsInterface.h"
 #include "Components/TimelineComponent.h"
 #include "GravityFPS/Types/CombatState.h"
+#include "GravityFPS/Types/FlyingState.h"
 #include "PlayerCharacter.generated.h"
 
 class UCameraComponent;
@@ -17,6 +18,11 @@ class AWeapon;
 class UCombatComponent;
 class UBuffComponent;
 class ULagCompensationComponent;
+class UNiagaraComponent;
+class UNiagaraSystem;
+class ACharacterPlayerController;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLeftGame);
 
 UCLASS()
 class GRAVITYFPS_API APlayerCharacter : public ACharacter, public IInteractWithCrosshairsInterface
@@ -46,14 +52,13 @@ protected:
 	void AimPressed();
 	void AimReleased();
 	void Reload();
+	void Fall();
 	UFUNCTION()
 	void RecieveDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType, class AController* InstigatorController, AActor* DamageCauser);
 
 
 public:
 	virtual void Tick(float DeltaTime) override;
-
-
 	FORCEINLINE float GetYaw() const { return AO_Yaw; }
 	FORCEINLINE float GetPitch() const { return AO_Pitch; }
 	FORCEINLINE ETurningInPlace GetTurningInPlace() const { return TurningInPlace; }
@@ -70,9 +75,12 @@ public:
 	FORCEINLINE float GetShield() const { return Shield; }
 	FORCEINLINE float GetMaxShield() const { return MaxShield; }
 	FORCEINLINE void SetShield(float Amount) { Shield = Amount; }
+	FORCEINLINE USceneComponent* GetBuffSpawnPoint() const { return BuffSpawnPoint; }
+	FORCEINLINE EFlyingState GetFlyingState() const { return FlyingState; }
 	bool isLocallyReloading() const;
 	ECombatState GetCombatState() const;
 	AWeapon* GetWeapon() const;
+	FString GetWeaponName() const;
 
 	void SetOverlappingWeapon(AWeapon* Weapon);
 	bool isAiming();
@@ -88,9 +96,9 @@ public:
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastHit();
 	FVector GetHitTarget() const;
-	void Die();
+	void Die(bool bPlayerLeftGame);
 	UFUNCTION(NetMulticast, Reliable)
-	void MulticastDie();
+	void MulticastDie(bool bPlayerLeftGame);
 
 	void UpdateHUDHealth();
 	void UpdateHUDShield();
@@ -104,16 +112,42 @@ public:
 
 	void SpawnDefaultWeapon();
 
+	void ActivateMovementBuffEffect();
+	void ActivatePowerBuffEffect();
+	void DeactivateMovementBuffEffect();
+	void DeactivatePowerBuffEffect();
+
 	UPROPERTY()
 	TMap<FName, class UBoxComponent*> HitCollisionBoxes;
 
+
+	FOnLeftGame OnLeftGame;
+
+	UFUNCTION(Server, Reliable)
+	void ServerLeaveGame();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastGainedTheLead();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastLostTheLead();
+
+	void ApplyRecoil(float Pitch, float Yaw);
+
+	void ResetGravityTimer();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastResetGravityTimer();
+
+	void StartCameraShake();
+	void StopCameraShake();
+
+	void SetLastDamager(ACharacterPlayerController* InController);
+	void ClearLastDamager();
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	UCameraComponent* FollowCamera;
 
 	UPROPERTY(EditAnywhere, Category = "Camera")
 	USpringArmComponent* SpringArm;
-
 
 	/*
 	* Input
@@ -145,6 +179,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	UInputAction* ReloadAction;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	UInputAction* FlyAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	UInputAction* FallAction;
 
 
 	UPROPERTY(ReplicatedUsing = OnRep_OverlapingWeapon)
@@ -165,6 +204,8 @@ protected:
 
 	UPROPERTY(VisibleAnywhere)
 	ULagCompensationComponent* LagCompensation;
+
+	void ResetRecoilOffset(float DeltaTime);
 
 
 	void AimOffset(float DeltaTime);
@@ -232,12 +273,11 @@ protected:
 
 	UPROPERTY(EditAnywhere)
 	UBoxComponent* foot_r;
-
-
 private:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-	class UWidgetComponent* OverheadWidget;
-	
+
+	//UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	//class UWidgetComponent* OverheadWidget;
+
 	UFUNCTION(Server, Reliable)
 	void ServerEquipWeapon(AWeapon* Weapon);
 	UFUNCTION(Server, Reliable)
@@ -319,6 +359,8 @@ private:
 
 	void DeadTimerFinished();
 
+	bool bLeftGame = false;
+
 	/*
 	* Dissolve Effect
 	*/
@@ -339,6 +381,12 @@ private:
 	// Material instance set on the blueprint used with the dynamic material instance. 
 	UPROPERTY(EditAnywhere, Category = "Killed")
 	TArray<UMaterialInstance*> DissolveMaterialInstances;
+
+	UPROPERTY(EditAnywhere)
+	class UNiagaraSystem* CrownSystem;
+
+	UPROPERTY(EditAnywhere)
+	class UNiagaraComponent* CrownSystemComponent;
 
 	UPROPERTY()
 	class ACharacterPlayerState* CharacterPlayerState;
@@ -361,4 +409,113 @@ private:
 
 	UPROPERTY(EditAnywhere)
 	TSubclassOf<AWeapon> DefaultWeaponClass;
+
+	/*
+	* Weapon Recoil
+	*/
+	FVector2D RecoilOffset = FVector2D(0.f, 0.f);
+	UPROPERTY(EditAnywhere, Category = "Recoil")
+	float RecoilRecoverySpeed = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Effects")
+	class USceneComponent* BuffSpawnPoint;
+
+	UPROPERTY(VisibleAnywhere, Category = "Effects")
+	UNiagaraComponent* MovementBuffEffectComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Effects")
+	UNiagaraComponent* PowerBuffEffectComponent;
+
+	// Niagara system assets for each effect, assign these in Blueprint or details panel
+	UPROPERTY(EditAnywhere, Category = "Effects")
+	UNiagaraSystem* MovementBuffEffectSystem;
+
+	UPROPERTY(EditAnywhere, Category = "Effects")
+	UNiagaraSystem* PowerBuffEffectSystem;
+	/*
+	* Gravity Movement
+	*/
+
+	UPROPERTY(Replicated)
+	EFlyingState FlyingState = EFlyingState::EFS_Idle;
+
+	UPROPERTY(EditAnywhere, Category = "Gravity Movement")
+	FVector HoverLaunchVelocity = FVector(0.f, 0.f, 100.f);
+
+	void ChangeFlyingState();
+	UFUNCTION()
+	void OnRep_FlyingState();
+	void InitiateHover();
+	void StartGravityTimer();
+	void InitiateFlying();
+	void ResetFlying();
+
+	UFUNCTION(Server, Reliable)
+	void ServerInitiateHover();
+	UFUNCTION(Server, Reliable)
+	void ServerInitiateFlying();
+	UFUNCTION(Server, Reliable)
+	void ServerResetFlying();
+
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastInitiateHover();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastInitiateFlying();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastResetFlying();
+
+
+	virtual void NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPrimitiveComponent* OtherComp,
+		bool bSelfMoved, FVector HitLocation, FVector HitNormal,
+		FVector NormalImpulse, const FHitResult& Hit) override;
+
+	FTimerHandle GravityTimer;
+
+	void GravityTimerFinished();
+
+	UPROPERTY(EditDefaultsOnly)
+	float GravityTime = 3.f;
+
+	UPROPERTY(EditDefaultsOnly)
+	float InitialFlyingKick = 500.f;
+
+	bool bCanGravity = true;
+
+	void DrawGravityBar();
+
+
+	/*
+	* VFX
+	*/
+
+	UPROPERTY(EditAnywhere, Category = "VFX")
+	class UParticleSystem* ThursterVFX;
+
+	UPROPERTY()
+	UParticleSystemComponent* ThrusterPSC;
+
+	UPROPERTY(EditAnywhere, Category = "Camera Shake")
+	TSubclassOf<UCameraShakeBase> FlyingCameraShakeClass;
+
+	UPROPERTY()
+	UCameraShakeBase* FlyingShakeInstance;
+
+	UFUNCTION()
+	void OnBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
+
+
+	/*
+	* Last Damager Timer
+	*/
+	UPROPERTY(Replicated)
+	ACharacterPlayerController* LastDamager;
+	FTimerHandle LastDamagerResetTimer;
+	float LastDamagerResetTime = 10.f;
 };

@@ -15,7 +15,7 @@ void AProjectileWeapon::Fire(const FVector& HitTarget)
 	APawn* InstigatorPawn = Cast<APawn>(GetOwner());
 	UWorld* World = GetWorld();
 
-	if (MuzzleSocket && World) {
+	if (MuzzleSocket && World && InstigatorPawn) {
 		FTransform SocketTransform = MuzzleSocket->GetSocketTransform(GetWeaponMesh());
 		// From muzzle to target from trace under crosshairs
 		FVector ToTarget = HitTarget - SocketTransform.GetLocation();
@@ -24,7 +24,6 @@ void AProjectileWeapon::Fire(const FVector& HitTarget)
 		Params.Owner = GetOwner();
 		Params.Instigator = InstigatorPawn;
 		AProjectile* Projectile = nullptr;
-
 		float DamageMultiplier = 1.f;
 		APlayerCharacter* OwnerCharacter = Cast<APlayerCharacter>(GetOwner());
 		if (OwnerCharacter)
@@ -68,6 +67,11 @@ void AProjectileWeapon::Fire(const FVector& HitTarget)
 				Projectile->bUseServerSideRewind = false;
 				Projectile->Damage = Damage * DamageMultiplier;
 			}
+		}
+
+		if (Projectile)
+		{
+			Projectile->IgnoreOwner(InstigatorPawn);
 		}
 	}
 }

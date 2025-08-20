@@ -5,6 +5,10 @@
 #include "GameFramework/PlayerController.h"
 #include "CharacterOverlay.h"
 #include "Announcement.h"
+#include "KillAnouncement.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/HorizontalBox.h"
+#include "Components/CanvasPanelSlot.h"
 
 
 void APlayerHUD::BeginPlay()
@@ -32,6 +36,53 @@ void APlayerHUD::AddAnnouncement()
 	}
 }
 
+void APlayerHUD::AddKillAnnoucement(const FString& AttackerName, const FString& VictimName, const FString& WeaponName)
+{
+	OwningPlayer = !OwningPlayer ? GetOwningPlayerController() : OwningPlayer;
+	if (OwningPlayer && KillAnnouncementClass) {
+		UKillAnouncement* KillAnnoucementWidget = CreateWidget<UKillAnouncement>(OwningPlayer, KillAnnouncementClass);
+		if (KillAnnoucementWidget) {
+			KillAnnoucementWidget->SetKillAnnoucementText(AttackerName, VictimName, WeaponName);
+			KillAnnoucementWidget->AddToViewport();
+			
+			for (auto Msg : KillMessages) {
+				if (Msg && Msg->AnnoucementBox) {
+                    UCanvasPanelSlot* CanvasSlot = UWidgetLayoutLibrary::SlotAsCanvasSlot(Msg->AnnoucementBox);
+					if (CanvasSlot) {
+						FVector2D Position = CanvasSlot->GetPosition();
+						FVector2D NewPosition(
+							CanvasSlot->GetPosition().X,
+							Position.Y + CanvasSlot->GetSize().Y
+						);
+						CanvasSlot->SetPosition(NewPosition);
+					}
+					
+				}
+			}
+
+			KillMessages.Add(KillAnnoucementWidget);
+
+			FTimerHandle KillMsgTimer;
+			FTimerDelegate KillMsgDelegate;
+			KillMsgDelegate.BindUFunction(this, FName("KillAnnoucementTimerFinished"), KillAnnoucementWidget);
+			GetWorldTimerManager().SetTimer(
+				KillMsgTimer,
+				KillMsgDelegate,
+				KillAnnoucementTime,
+				false
+			);
+		}
+	}
+}
+
+
+void APlayerHUD::KillAnnoucementTimerFinished(UKillAnouncement* MsgToRemove)
+{
+	if (MsgToRemove)
+	{
+		MsgToRemove->RemoveFromParent();
+	}
+}
 
 void APlayerHUD::DrawHUD()
 {

@@ -12,6 +12,7 @@
 class AWeapon;
 class APlayerCharacter;
 class UCameraComponent;
+class AProjectile;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class GRAVITYFPS_API UCombatComponent : public UActorComponent
@@ -194,13 +195,28 @@ private:
 	UFUNCTION()
 	void OnRep_CombatState();
 
-	UPROPERTY(VisibleAnywhere)
-	float PowerMultiplier = 1.f;
+
+	UPROPERTY(VisibleAnywhere, Replicated)
+	float GravityPowerMultiplier = 1.f;
+	UPROPERTY(VisibleAnywhere, Replicated)
+	float PowerupPowerMultiplier = 1.f;
+
+	/*
+	* recoil
+	*/
+
+	float BaseRecoilPitch = .5f;
+	float BaseRecoilYaw = 0.1f;
+	UPROPERTY(EditAnywhere, Category = "Recoil")
+	float ADSRecoilMultiplier = .65f;
+	void InitiateRecoil();
 	
 public:
 	bool ShouldSwapWeapons();
 
 	FORCEINLINE bool CanSwap() const { return EquippedWeapon && SecondaryWeapon; }
-	FORCEINLINE void SetPowerMultiplier(float Multiplier) { PowerMultiplier = Multiplier; }
-	FORCEINLINE float GetPowerMultiplier() const { return PowerMultiplier; }
+
+	FORCEINLINE void SetGravityPowerMultiplier(float Multiplier) { GravityPowerMultiplier = Multiplier; }
+	FORCEINLINE void SetPowerUpPowerMultiplier(float Multiplier) { PowerupPowerMultiplier = Multiplier; }
+	FORCEINLINE float GetPowerMultiplier() const { return GravityPowerMultiplier * PowerupPowerMultiplier; }
 };

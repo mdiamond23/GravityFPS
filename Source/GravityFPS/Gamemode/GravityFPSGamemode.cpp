@@ -65,20 +65,54 @@ void AGravityFPSGamemode::OnMatchStateSet()
 void AGravityFPSGamemode::PlayerKilled(APlayerCharacter* KilledCharacter, ACharacterPlayerController* VictimController, ACharacterPlayerController* AttackerController)
 {
 	ACharacterPlayerState* AttackerPlayerState = AttackerController ? Cast<ACharacterPlayerState>(AttackerController->PlayerState) : nullptr;
-	ACharacterPlayerState* VictimPlayerState = AttackerController ? Cast<ACharacterPlayerState>(VictimController->PlayerState) : nullptr;
+	ACharacterPlayerState* VictimPlayerState = VictimController ? Cast<ACharacterPlayerState>(VictimController->PlayerState) : nullptr;
 	AGravityFPSGameState* GravityFPSGameState = GetGameState<AGravityFPSGameState>();
 
 	if (AttackerPlayerState && AttackerPlayerState != VictimPlayerState && GravityFPSGameState) {
+		TArray<ACharacterPlayerState*> PlayersCurrentlyInTheLead;
+		for (auto LeadPlayer : GravityFPSGameState->TopScoringPlayers) {
+			PlayersCurrentlyInTheLead.Add(LeadPlayer);
+		}
 		AttackerPlayerState->AddToScore(100.f);
 		GravityFPSGameState->UpdateTopScore(AttackerPlayerState);
+
+		// Adding crown to new leading player
+		if (GravityFPSGameState->TopScoringPlayers.Contains(AttackerPlayerState)) {
+			APlayerCharacter* Leader = Cast<APlayerCharacter>(AttackerPlayerState);
+			if (Leader) {
+				Leader->MulticastGainedTheLead();
+			}
+		}
+
+		// Stripping crown from players that lost the lead
+		for (int32 i = 0; i < PlayersCurrentlyInTheLead.Num(); i++) {
+			if (!GravityFPSGameState->TopScoringPlayers.Contains(PlayersCurrentlyInTheLead[i])) {
+				APlayerCharacter* Loser = Cast<APlayerCharacter>(PlayersCurrentlyInTheLead[i]->GetPawn());
+				if (Loser) {
+					Loser->MulticastLostTheLead();
+				}
+			}
+		}
 	}
 
 	if (VictimPlayerState) {
 		VictimPlayerState->AddToDeaths(1);
 	}
 
-	if (KilledCharacter)
-		KilledCharacter->Die();
+	if (KilledCharacter) {
+		KilledCharacter->Die(false);
+	}
+		
+
+	APlayerCharacter* AttackerCharacter = AttackerController ? Cast<APlayerCharacter>(AttackerController->GetPawn()) : nullptr;
+	if (!AttackerCharacter) return;
+	AttackerCharacter->MulticastResetGravityTimer();
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It) {
+		ACharacterPlayerController* CharacterPlayer = Cast<ACharacterPlayerController>(*It);
+		if (CharacterPlayer && AttackerPlayerState && VictimPlayerState) {
+			CharacterPlayer->BroadcastKill(AttackerPlayerState, VictimPlayerState, AttackerCharacter->GetWeaponName());
+		}
+	}
 }
 
 void AGravityFPSGamemode::RequestRespawn(ACharacter* KilledCharacter, AController* KilledController)
@@ -93,4 +127,15 @@ void AGravityFPSGamemode::RequestRespawn(ACharacter* KilledCharacter, AControlle
 		int32 Selection = FMath::RandRange(0, PlayerStarts.Num() - 1);
 		RestartPlayerAtPlayerStart(KilledController, PlayerStarts[Selection]);
 	}
+}
+
+void AGravityFPSGamemode::PlayerLeftGame(ACharacterPlayerState* PlayerLeaving)
+{
+	if (!PlayerLeaving) return;
+	AGravityFPSGameState* GravityFPSGameState = GetGameState<AGravityFPSGameState>();
+	if (GravityFPSGameState && GravityFPSGameState->TopScoringPlayers.Contains(PlayerLeaving)) {
+		GravityFPSGameState->TopScoringPlayers.Remove(PlayerLeaving);
+	}
+	APlayerCharacter* CharacterLeaving = Cast<APlayerCharacter>(PlayerLeaving->GetPawn());
+	if (CharacterLeaving) CharacterLeaving->Die(true);
 }

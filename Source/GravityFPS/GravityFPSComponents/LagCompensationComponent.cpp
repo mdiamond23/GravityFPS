@@ -8,6 +8,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "GravityFPS/Weapon/Weapon.h"
 #include "GravityFPS/GravityFPS.h"
+#include "CombatComponent.h"
 
 ULagCompensationComponent::ULagCompensationComponent()
 {
@@ -82,7 +83,7 @@ FServerSideRewindResult ULagCompensationComponent::ConfirmHit(const FFramePackag
 			if (ConfrimHitResult.Component.IsValid()) {
 				UBoxComponent* Box = Cast<UBoxComponent>(ConfrimHitResult.Component);
 				if (Box) {
-					DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Red, false, 8.f);
+					//DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Red, false, 8.f);
 				}
 			}
 
@@ -110,7 +111,7 @@ FServerSideRewindResult ULagCompensationComponent::ConfirmHit(const FFramePackag
 				if (ConfrimHitResult.Component.IsValid()) {
 					UBoxComponent* Box = Cast<UBoxComponent>(ConfrimHitResult.Component);
 					if (Box) {
-						DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Blue, false, 8.f);
+						//DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Blue, false, 8.f);
 					}
 				}
 
@@ -159,7 +160,7 @@ FServerSideRewindResult ULagCompensationComponent::ProjectileConfirmHit(const FF
 		if (PathResult.HitResult.Component.IsValid()) {
 			UBoxComponent* Box = Cast<UBoxComponent>(PathResult.HitResult.Component);
 			if (Box) {
-				DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Red, false, 8.f);
+				//DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Red, false, 8.f);
 			}
 		}
 
@@ -181,7 +182,7 @@ FServerSideRewindResult ULagCompensationComponent::ProjectileConfirmHit(const FF
 			if (PathResult.HitResult.Component.IsValid()) {
 				UBoxComponent* Box = Cast<UBoxComponent>(PathResult.HitResult.Component);
 				if (Box) {
-					DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Blue, false, 8.f);
+					//DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Blue, false, 8.f);
 				}
 			}
 
@@ -236,7 +237,7 @@ FShotgunServerSideRewindResult ULagCompensationComponent::ShotgunConfirmHit(cons
 			if (ConfrimHitResult.Component.IsValid()) {
 				UBoxComponent* Box = Cast<UBoxComponent>(ConfrimHitResult.Component);
 				if (Box){
-					DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Red, false, 8.f);
+					//DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Red, false, 8.f);
 				}
 			}
 
@@ -276,7 +277,7 @@ FShotgunServerSideRewindResult ULagCompensationComponent::ShotgunConfirmHit(cons
 			if (ConfrimHitResult.Component.IsValid()) {
 				UBoxComponent* Box = Cast<UBoxComponent>(ConfrimHitResult.Component);
 				if (Box) {
-					DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Blue, false, 8.f);
+					//DrawDebugBox(GetWorld(), Box->GetComponentLocation(), Box->GetScaledBoxExtent(), FQuat(Box->GetComponentRotation()), FColor::Blue, false, 8.f);
 				}
 			}
 			if (ShotgunResult.Bodyshots.Contains(PlayerCharacter)) ++ShotgunResult.Bodyshots[PlayerCharacter];
@@ -438,17 +439,19 @@ FFramePackage ULagCompensationComponent::GetFrameToCheck(APlayerCharacter* HitCh
 }
 
 
-void ULagCompensationComponent::ServerScoreRequest_Implementation(APlayerCharacter* HitCharacter, const FVector_NetQuantize& TraceStart, const FVector_NetQuantize& HitLocation, float HitTime, AWeapon* DamageCauser)
+void ULagCompensationComponent::ServerScoreRequest_Implementation(APlayerCharacter* HitCharacter, const FVector_NetQuantize& TraceStart, const FVector_NetQuantize& HitLocation, float HitTime)
 {
 	FServerSideRewindResult Confirm = ServerSideRewind(HitCharacter, TraceStart, HitLocation, HitTime);
 	
 
-	if (Character && HitCharacter && DamageCauser && Confirm.bHitConfirmed) {
+	if (Character && HitCharacter && Character->GetWeapon() && Confirm.bHitConfirmed) {
+		float Damage = Character->GetCombat()->GetPowerMultiplier() * Character->GetWeapon()->GetDamage();
+		Damage = Confirm.bHeadShot ? Damage * Character->GetWeapon()->GetHeadshotMultiplier() : Damage;
 		UGameplayStatics::ApplyDamage(
 			HitCharacter,
-			DamageCauser->GetDamage(),
+			Damage,
 			Character->Controller,
-			DamageCauser,
+			Character->GetWeapon(),
 			UDamageType::StaticClass()
 		);
 	}
@@ -458,9 +461,11 @@ void ULagCompensationComponent::ProjectileServerScoreRequest_Implementation(APla
 {
 	FServerSideRewindResult Confirm = ProjectileServerSideRewind(HitCharacter, TraceStart, InitialVelocity, HitTime);
 	if (Character && HitCharacter && Confirm.bHitConfirmed) {
+		float Damage = Character->GetCombat()->GetPowerMultiplier() * Character->GetWeapon()->GetDamage();
+		Damage = Confirm.bHeadShot ? Damage * Character->GetWeapon()->GetHeadshotMultiplier() : Damage;
 		UGameplayStatics::ApplyDamage(
 			HitCharacter,
-			Character->GetWeapon()->GetDamage(),
+			Damage,
 			Character->Controller,
 			Character->GetWeapon(),
 			UDamageType::StaticClass()
@@ -478,9 +483,9 @@ void ULagCompensationComponent::ShotgunServerScoreRequest_Implementation(const T
 		if (!HitCharacter || !HitCharacter->GetWeapon() || !Character) continue;
 		float TotalDamage = 0.f;
 		if (Confirm.Headshots.Contains(HitCharacter))
-			TotalDamage += Confirm.Headshots[HitCharacter] * HitCharacter->GetWeapon()->GetDamage(); // Headshot Damage
+			TotalDamage += Confirm.Headshots[HitCharacter] * HitCharacter->GetWeapon()->GetDamage() * HitCharacter->GetWeapon()->GetHeadshotMultiplier() * HitCharacter->GetCombat()->GetPowerMultiplier(); // Headshot Damage
 		if (Confirm.Bodyshots.Contains(Character))
-			TotalDamage += Confirm.Bodyshots[HitCharacter] * HitCharacter->GetWeapon()->GetDamage(); // Bodyshot Damage
+			TotalDamage += Confirm.Bodyshots[HitCharacter] * HitCharacter->GetWeapon()->GetDamage() * HitCharacter->GetCombat()->GetPowerMultiplier(); // Bodyshot Damage
 
 		UGameplayStatics::ApplyDamage(
 			HitCharacter,

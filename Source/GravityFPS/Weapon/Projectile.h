@@ -24,6 +24,9 @@ public:
 	UPROPERTY(EditAnywhere)
 	float InitialSpeed = 35000.f;
 	float Damage = 20.f;
+
+	UPROPERTY(EditAnywhere)
+	float HeadshotMultiplier = 2.f;
 protected:
 	virtual void BeginPlay() override;
 
@@ -45,6 +48,7 @@ protected:
 public:	
 	virtual void Tick(float DeltaTime) override;
 	FORCEINLINE void MultiplyDamage(float DamageMultiplier) { Damage *= DamageMultiplier; }
+	void IgnoreOwner(APawn* MyOwner);
 	//virtual void Destroyed() override;
 
 private:

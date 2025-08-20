@@ -49,9 +49,24 @@ void AHitScanWeapon::Fire(const FVector& HitTarget)
 		}
 
 		APlayerCharacter* PlayerCharacter = Cast<APlayerCharacter>(FireHit.GetActor());
+
 		if (PlayerCharacter && InstigatorController) {
 			bool bCauseAuthDamage = !bUseServerSideRewind || OwnerPawn->IsLocallyControlled();
+			FinalDamage = FireHit.BoneName.ToString() == FString("head") ? FinalDamage * GetHeadshotMultiplier() : FinalDamage;
+
+			if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+			{
+				ACharacterPlayerController* ShooterController = Cast<ACharacterPlayerController>(OwnerPawn->GetController());
+				if (ShooterController)
+				{
+					bool bVictimHasShield = PlayerCharacter->GetShield() > 0.f;
+					ShooterController->ShowDamageMarker(FinalDamage, bVictimHasShield);
+				}
+			}
+			// Send signal to spawn damage marker
+
 			if (HasAuthority() && bCauseAuthDamage) {
+
 				UGameplayStatics::ApplyDamage(
 					PlayerCharacter,
 					FinalDamage,
@@ -60,6 +75,7 @@ void AHitScanWeapon::Fire(const FVector& HitTarget)
 					UDamageType::StaticClass()
 				);
 			}
+
 			if (!HasAuthority() && bUseServerSideRewind) {
 				OwnerPlayerCharacter = !OwnerPlayerCharacter ? Cast<APlayerCharacter>(OwnerPawn) : OwnerPlayerCharacter;
 				OwnerPlayerController = !OwnerPlayerController ? Cast<ACharacterPlayerController>(InstigatorController) : OwnerPlayerController;
@@ -69,8 +85,7 @@ void AHitScanWeapon::Fire(const FVector& HitTarget)
 						PlayerCharacter,
 						Start,
 						HitTarget,
-						OwnerPlayerController->GetServerTime() - OwnerPlayerController->SingleTripTime,
-						this
+						OwnerPlayerController->GetServerTime() - OwnerPlayerController->SingleTripTime
 					);
 				}
 			}
@@ -136,12 +151,16 @@ void AHitScanWeapon::WeaponTraceHit(const FVector& TraceStart, const FVector& Hi
 
 	if (World) {
 		FVector End = TraceStart + (HitTarget - TraceStart) * 1.25f;
+		FCollisionQueryParams TraceParams;
+		TraceParams.AddIgnoredActor(GetOwner());
+
 
 		World->LineTraceSingleByChannel(
 			OutHit,
 			TraceStart,
 			End,
-			ECollisionChannel::ECC_Visibility
+			ECollisionChannel::ECC_Visibility,
+			TraceParams
 		);
 		
 		FVector BeamEnd = End;
@@ -149,8 +168,11 @@ void AHitScanWeapon::WeaponTraceHit(const FVector& TraceStart, const FVector& Hi
 		if (OutHit.bBlockingHit) {
 			BeamEnd = OutHit.ImpactPoint;
 		}
+		else {
+			OutHit.ImpactPoint = End;
+		}
 		if (BeamParticles) {
-			UParticleSystemComponent * Beam = UGameplayStatics::SpawnEmitterAtLocation(
+			UParticleSystemComponent* Beam = UGameplayStatics::SpawnEmitterAtLocation(
 				World,
 				BeamParticles,
 				TraceStart,

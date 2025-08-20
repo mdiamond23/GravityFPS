@@ -45,6 +45,8 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaTime)
 
 	TurningInPlace = PlayerCharacter->GetTurningInPlace();
 
+	FlyingState = PlayerCharacter->GetFlyingState();
+
 	if (EquippedWeapon && EquippedWeapon->GetWeaponMesh() && PlayerCharacter->GetMesh()) {
 		if (EquippedWeapon && EquippedWeapon->GetWeaponMesh() && PlayerCharacter->GetMesh()){
 			LeftHandTransform = EquippedWeapon->GetWeaponMesh()->GetSocketTransform(FName("LeftHandSocket"), ERelativeTransformSpace::RTS_World);
@@ -71,7 +73,7 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaTime)
 		}
 	}
 
-	bUseFABRIK = PlayerCharacter->GetCombatState() != ECombatState::ECS_Reloading;
+	bUseFABRIK = PlayerCharacter->GetCombatState() != ECombatState::ECS_Reloading && FlyingState != EFlyingState::EFS_Hovering;
 	bool bFABRIKOverride = PlayerCharacter->IsLocallyControlled();
 	if (bFABRIKOverride) bUseFABRIK = !PlayerCharacter->isLocallyReloading() && PlayerCharacter->bFinishedSwapping;
 	bUseAimOffsets = PlayerCharacter->GetCombatState() != ECombatState::ECS_Reloading && !PlayerCharacter->bDisableGameplay;

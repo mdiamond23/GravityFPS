@@ -33,6 +33,7 @@ public:
 
 	void AddCharacterOverlay();
 	void AddAnnouncement();
+	void AddKillAnnoucement(const FString& AttackerName, const FString& VictimName, const FString& WeaponName);
 
 	FORCEINLINE void SetHUDPackage(const FHUDPackage& Package) { HUDPackage = Package; }
 
@@ -53,8 +54,22 @@ protected:
 
 
 private:
+	UPROPERTY()
+	class APlayerController* OwningPlayer;
 	void DrawCrosshair(UTexture2D* Texture, FVector2D ViewportCenter, FVector2D Spread, FLinearColor CrosshairColor);
 
 	UPROPERTY(EditAnywhere)
 	float CrosshairSpreadMax = 16.f;
+
+	UPROPERTY(EditAnywhere)
+	TSubclassOf<class UKillAnouncement> KillAnnouncementClass;
+
+	UPROPERTY(EditAnywhere)
+	float KillAnnoucementTime = 2.5f;
+
+	UFUNCTION()
+	void KillAnnoucementTimerFinished(UKillAnouncement* MsgToRemove);
+
+	UPROPERTY()
+	TArray<class UKillAnouncement*> KillMessages;
 };

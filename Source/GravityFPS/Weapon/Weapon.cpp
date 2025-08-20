@@ -12,6 +12,7 @@
 #include "Magazine.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Engine/SkeletalMeshSocket.h"
+#include "WeaponSpawnPoint.h"
 
 AWeapon::AWeapon()
 {
@@ -213,6 +214,11 @@ void AWeapon::OnEquipped()
 	if (OwnerPlayerCharacter && bUseServerSideRewind) {
 		OwnerPlayerController = !OwnerPlayerController ? Cast<ACharacterPlayerController>(OwnerPlayerCharacter->Controller) : OwnerPlayerController;
 		if (OwnerPlayerController && HasAuthority() && !OwnerPlayerController->HighPingDelegate.IsBound()) OwnerPlayerController->HighPingDelegate.AddDynamic(this, &AWeapon::OnPingTooHigh);
+	}
+
+	if (WeaponSpawnPoint) {
+		WeaponSpawnPoint->StartSpawnWeaponTimer();
+		WeaponSpawnPoint = nullptr;
 	}
 }
 

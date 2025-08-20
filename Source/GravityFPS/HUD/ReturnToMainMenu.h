@@ -20,6 +20,10 @@ public:
 
 protected:
 	virtual bool Initialize() override;
+	UFUNCTION()
+	void OnDestroySession(bool bWasSucessful);
+	UFUNCTION()
+	void OnPlayerLeftGame();
 
 private:
 	UPROPERTY(meta = (BindWidget))
@@ -27,4 +31,10 @@ private:
 
 	UFUNCTION()
 	void ReturnButtonClicked();
+
+	UPROPERTY()
+	class UMultiplayerSessionsSubsystem* MultiplayerSessionsSubsystem;
+
+	UPROPERTY()
+	class APlayerController* PlayerController;
 };
